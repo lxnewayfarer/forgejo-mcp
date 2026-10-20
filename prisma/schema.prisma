@@ -1,0 +1,158 @@
+generator client {
+  provider      = "prisma-client-js"
+  // Native target for local dev + the Debian (bookworm/OpenSSL 3) target used
+  // by the Docker runtime image.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  forgejoUserId Int      @unique
+  username      String
+  name          String
+  email         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  oauthAccount       OAuthAccount?
+  sessions           Session[]
+  auditLogs          AuditLog[]
+  oauthRefreshTokens OAuthRefreshToken[]
+
+  @@map("users")
+}
+
+model OAuthAccount {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  provider     String    @default("forgejo")
+  // Encrypted (AES-256-GCM) ciphertext, never plaintext.
+  accessToken  String
+  refreshToken String?
+  tokenType    String    @default("bearer")
+  scope        String?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("oauth_accounts")
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  // sha-256 hash of the opaque bearer token; raw token is shown to the user once.
+  tokenHash String    @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  forgejoUsername String?
+  toolName        String
+  // Sanitized parameters — secrets are stripped before persisting.
+  params          Json
+  status          String // "success" | "error"
+  errorMessage    String?
+  executionMs     Int
+  createdAt       DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([toolName])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model OAuthClient {
+  id               String   @id @default(cuid())
+  clientId         String   @unique
+  clientName       String?
+  redirectUris     String[]
+  grantTypes       String[] @default(["authorization_code", "refresh_token"])
+  clientSecretHash String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("oauth_clients")
+}
+
+model OAuthRefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  clientId  String
+  // Rotation chain id. All tokens minted from a single authorization-code grant
+  // (the original token and every token it rotates into) share one familyId.
+  // Presenting an already-rotated token is reuse — the whole family is revoked.
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("oauth_refresh_tokens")
+}
+
+model OAuthState {
+  state     String   @id
+  verifier  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("oauth_states")
+}
+
+model OAuthPending {
+  state         String   @id
+  clientId      String
+  redirectUri   String
+  clientState   String?
+  codeChallenge String
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("oauth_pending")
+}
+
+model OAuthCode {
+  codeHash        String   @id
+  clientId        String
+  redirectUri     String
+  codeChallenge   String
+  userId          String
+  sessionTokenEnc String
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("oauth_codes")
+}

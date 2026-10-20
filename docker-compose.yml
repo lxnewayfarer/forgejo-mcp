@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-forgejo_mcp}
+      # No default — must be supplied (e.g. in .env). Avoids shipping a stack
+      # with a well-known password that the app's production gate also rejects.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your .env}
+      POSTGRES_DB: ${POSTGRES_DB:-forgejo_mcp}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forgejo_mcp}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Defaults to development so a local `docker compose up` works. For a real
+      # deployment set NODE_ENV=production (the app then enforces https
+      # PUBLIC_BASE_URL, non-localhost datastores, and a strong DB password).
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-forgejo_mcp}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in your .env}@postgres:5432/${POSTGRES_DB:-forgejo_mcp}?schema=public
+      FORGEJO_BASE_URL: ${FORGEJO_BASE_URL:?set FORGEJO_BASE_URL in your .env}
+      FORGEJO_CLIENT_ID: ${FORGEJO_CLIENT_ID:?set FORGEJO_CLIENT_ID in your .env}
+      FORGEJO_CLIENT_SECRET: ${FORGEJO_CLIENT_SECRET:?set FORGEJO_CLIENT_SECRET in your .env}
+      FORGEJO_REDIRECT_URI: ${FORGEJO_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      FORGEJO_SCOPES: ${FORGEJO_SCOPES:-read:user write:repository write:issue}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in your .env (openssl rand -hex 32)}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+      TOKEN_REFRESH_SKEW_SECONDS: ${TOKEN_REFRESH_SKEW_SECONDS:-60}
+      OAUTH_CODE_TTL_SECONDS: ${OAUTH_CODE_TTL_SECONDS:-60}
+      OAUTH_REFRESH_TTL_HOURS: ${OAUTH_REFRESH_TTL_HOURS:-720}
+    ports:
+      - "${PORT:-3000}:3000"
+
+volumes:
+  pgdata:
